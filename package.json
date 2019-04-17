@@ -1,0 +1,29 @@
+{
+  "name": "@moovel/s3-config",
+  "version": "1.1.3",
+  "description": "npm distribution for s3-config binaries",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "go-npm install",
+    "preuninstall": "go-npm uninstall"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moovel/s3-config.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/moovel/s3-config/issues"
+  },
+  "homepage": "https://github.com/moovel/s3-config#readme",
+  "dependencies": {
+    "@maple-leaf/go-npm": "^0.1.9"
+  },
+  "goBinary": {
+    "name": "s3-config",
+    "path": "./bin",
+    "url": "https://github.com/moovel/s3-config/releases/download/v{{version}}/s3-config_{{platform}}_{{arch}}.tar.gz"
+  }
+}

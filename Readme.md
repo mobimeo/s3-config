@@ -12,3 +12,9 @@ brew install dep
 ```
 go build
 ```
+
+## init config file
+
+```
+./s3-config init
+```

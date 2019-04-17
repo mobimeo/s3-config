@@ -26,6 +26,8 @@ type PushCmd struct {
 	env string
 }
 
+type InitCmd struct{}
+
 func (*PullCmd) Name() string     { return "pull" }
 func (*PullCmd) Synopsis() string { return "pull config" }
 func (*PullCmd) Usage() string {
@@ -42,6 +44,14 @@ func (*PushCmd) Usage() string {
 `
 }
 
+func (*InitCmd) Name() string     { return "init" }
+func (*InitCmd) Synopsis() string { return "bootstrap empty config file" }
+func (*InitCmd) Usage() string {
+	return `init:
+  creates a .s3-config.yaml scaffold
+`
+}
+
 func (p *PullCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&p.env, "env", os.Getenv("ENV"), "environment")
 }
@@ -50,42 +60,61 @@ func (p *PushCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&p.env, "env", os.Getenv("ENV"), "environment")
 }
 
-func (p *PullCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
-	if p.env == "" {
-		f.Usage()
-		return subcommands.ExitUsageError
+func (p *InitCmd) SetFlags(_ *flag.FlagSet) {}
+
+func (p *InitCmd) Execute(_ context.Context, _ *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	var filename = ".s3-config.yaml"
+
+	if _, err := os.Stat(filename); err == nil {
+		if !prompter.YN(filename+" exists. create anyway?", false) {
+			return subcommands.ExitFailure
+		}
 	}
 
-	cf := ctx.Value("cf").(*ConfigFile)
-	config, err := getConfig(cf, p.env)
-	if err != nil {
-		panic(err)
-	}
+	var scaffold = `environments:
+- name: development
+  url: s3://< path to remote file>/development.env
+  region: eu-west-1
+  local: ./do_not_commit/development.env
+  kms: < arn to kms key for sse >
+- name: production
+  url: s3://< path to remote file>/production.env
+  region: eu-west-1
+  local: ./do_not_commit/production.env
+  kms: < arn to kms key for sse >
+`
 
-	s3, err := retrieveFile(config.Url, config.Region)
-	if err != nil {
-		panic(err)
-	}
-
-	err = ioutil.WriteFile(config.Local, s3, 0644)
-	if err != nil {
-		panic(err)
-	}
+	err := ioutil.WriteFile(filename, []byte(scaffold), 0644)
+	checkErr(err)
 
 	return subcommands.ExitSuccess
 }
 
-func (p *PushCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+func (p *PullCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+	if p.env == "" {
+		f.Usage()
+		return subcommands.ExitUsageError
+	}
+	config, err := getConfig(p.env)
+	checkErr(err)
+
+	s3, err := retrieveFile(config.Url, config.Region)
+	checkErr(err)
+
+	err = ioutil.WriteFile(config.Local, s3, 0644)
+	checkErr(err)
+
+	return subcommands.ExitSuccess
+}
+
+func (p *PushCmd) Execute(_ context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
 	if p.env == "" {
 		f.Usage()
 		return subcommands.ExitUsageError
 	}
 
-	cf := ctx.Value("cf").(*ConfigFile)
-	config, err := getConfig(cf, p.env)
-	if err != nil {
-		panic(err)
-	}
+	config, err := getConfig(p.env)
+	checkErr(err)
 
 	s3obj, err := retrieveFile(config.Url, config.Region)
 	if err != nil {
@@ -96,9 +125,7 @@ func (p *PushCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}
 	}
 
 	local, err := ioutil.ReadFile(config.Local)
-	if err != nil {
-		panic(err)
-	}
+	checkErr(err)
 
 	dmp := diffmatchpatch.New()
 	diffs := dmp.DiffMain(string(s3obj), string(local), true)
@@ -110,9 +137,7 @@ func (p *PushCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}
 	}
 
 	err = putFile(config.Url, config.Region, config.Kms, local)
-	if err != nil {
-		panic(err)
-	}
+	checkErr(err)
 
 	return subcommands.ExitSuccess
 }
@@ -131,9 +156,8 @@ type ConfigFile struct {
 
 func putFile(s3url string, region string, key string, data []byte) error {
 	fragments, err := url.Parse(s3url)
-	if err != nil {
-		panic(err)
-	}
+	checkErr(err)
+
 	svc := s3.New(session.New(&aws.Config{Region: aws.String(region)}))
 	_, err = svc.PutObject(&s3.PutObjectInput{
 		Bucket:               aws.String(fragments.Host),
@@ -147,24 +171,22 @@ func putFile(s3url string, region string, key string, data []byte) error {
 
 func retrieveFile(s3url string, region string) ([]byte, error) {
 	fragments, err := url.Parse(s3url)
-	if err != nil {
-		panic(err)
-	}
+	checkErr(err)
+
 	svc := s3.New(session.New(&aws.Config{Region: aws.String(region)}))
 	params := &s3.GetObjectInput{Bucket: aws.String(fragments.Host), Key: aws.String(fragments.Path)}
 	res, err := svc.GetObject(params)
-	if err != nil {
-		return nil, err
-	}
+	checkErr(err)
 
 	defer res.Body.Close()
 	return ioutil.ReadAll(res.Body)
 }
 
-func getConfig(c *ConfigFile, key string) (*Config, error) {
+func getConfig(key string) (*Config, error) {
+	cf := readConfigFile()
 	var config *Config
 
-	for _, e := range c.Enviroments {
+	for _, e := range cf.Enviroments {
 		if e.Name == key {
 			config = &e
 		}
@@ -180,17 +202,19 @@ func getConfig(c *ConfigFile, key string) (*Config, error) {
 
 func readConfigFile() *ConfigFile {
 	data, err := ioutil.ReadFile(".s3-config.yaml")
-	if err != nil {
-		panic(err)
-	}
+	checkErr(err)
 
 	cf := ConfigFile{}
 	err = yaml.Unmarshal(data, &cf)
+	checkErr(err)
+
+	return &cf
+}
+
+func checkErr(err error) {
 	if err != nil {
 		panic(err)
 	}
-
-	return &cf
 }
 
 func main() {
@@ -198,11 +222,9 @@ func main() {
 	subcommands.Register(subcommands.CommandsCommand(), "")
 	subcommands.Register(&PullCmd{}, "")
 	subcommands.Register(&PushCmd{}, "")
+	subcommands.Register(&InitCmd{}, "")
 
 	flag.Parse()
 
-	cf := readConfigFile()
-	ctx := context.WithValue(context.Background(), "cf", cf)
-
-	os.Exit(int(subcommands.Execute(ctx)))
+	os.Exit(int(subcommands.Execute(context.Background())))
 }
