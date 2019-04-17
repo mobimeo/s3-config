@@ -176,7 +176,9 @@ func retrieveFile(s3url string, region string) ([]byte, error) {
 	svc := s3.New(session.New(&aws.Config{Region: aws.String(region)}))
 	params := &s3.GetObjectInput{Bucket: aws.String(fragments.Host), Key: aws.String(fragments.Path)}
 	res, err := svc.GetObject(params)
-	checkErr(err)
+	if err != nil {
+		return nil, err
+	}
 
 	defer res.Body.Close()
 	return ioutil.ReadAll(res.Body)
