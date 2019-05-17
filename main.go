@@ -188,9 +188,9 @@ func getConfig(key string) (*Config, error) {
 	cf := readConfigFile()
 	var config *Config
 
-	for _, e := range cf.Enviroments {
+	for i, e := range cf.Enviroments {
 		if e.Name == key {
-			config = &e
+			config = &cf.Enviroments[i]
 		}
 	}
 
