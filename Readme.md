@@ -1,5 +1,9 @@
 # s3-config
 
+Welcome to s3-config!
+
+This is not an official Reach-Now product.
+
 ## requirements
 
 The project used `go mod` as package mgmt util, so a recent Go toolchain is required (1.12+).
